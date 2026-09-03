@@ -1,3 +1,29 @@
 {
-  "targets": {}
+  "targets": {
+    "default": {
+      "resources": {
+        "runtimes": {
+          "EnterpriseAssistant": {
+            "runtimeId": "EnterpriseAssistant_EnterpriseAssistant-sPI7iu7ohR",
+            "runtimeArn": "arn:aws:bedrock-agentcore:ap-south-1:202233310639:runtime/EnterpriseAssistant_EnterpriseAssistant-sPI7iu7ohR",
+            "roleArn": "arn:aws:iam::202233310639:role/AgentCore-EnterpriseAssis-ApplicationAgentEnterpris-WRj5U0fYwUN3"
+          }
+        },
+        "memories": {
+          "EnterpriseAssistantMemory": {
+            "memoryId": "EnterpriseAssistant_EnterpriseAssistantMemory-uRTgru2jQl",
+            "memoryArn": "arn:aws:bedrock-agentcore:ap-south-1:202233310639:memory/EnterpriseAssistant_EnterpriseAssistantMemory-uRTgru2jQl"
+          }
+        },
+        "credentials": {
+          "EnterpriseAssistantGemini": {
+            "credentialProviderArn": "arn:aws:bedrock-agentcore:ap-south-1:202233310639:token-vault/default/apikeycredentialprovider/EnterpriseAssistantGemini"
+          }
+        },
+        "stackName": "AgentCore-EnterpriseAssistant-default",
+        "identityKmsKeyArn": "arn:aws:kms:ap-south-1:202233310639:key/048cbd56-4216-4279-9fd1-cd84ddc1ac9c",
+        "deployHash": "6728b7088b55b0cc"
+      }
+    }
+  }
 }
