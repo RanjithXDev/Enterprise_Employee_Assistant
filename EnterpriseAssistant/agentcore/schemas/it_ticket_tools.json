@@ -1,16 +1,20 @@
 [
   {
     "name": "get_ticket_details",
-    "description": "Retrieve IT ticket details by ticket ID.",
+    "description": "Retrieve IT ticket details by ticket ID for an authorized employee.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "ticket_id": {
           "type": "string",
           "description": "The IT ticket ID, for example INC-1001."
+        },
+        "requester_id": {
+          "type": "string",
+          "description": "Authenticated employee ID requesting the ticket."
         }
       },
-      "required": ["ticket_id"]
+      "required": ["ticket_id", "requester_id"]
     }
   }
 ]
