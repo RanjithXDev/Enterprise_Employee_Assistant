@@ -7,13 +7,20 @@ import uuid
 
 
 @tool
-def get_device_status(employee_id: str) -> str:
+def get_device_status(
+    employee_id: str,
+    requester_id: str,
+) -> str:
     """
     Get the current device status for an employee.
-
-    Args:
-        employee_id: Unique employee identifier.
     """
+
+    if requester_id != employee_id:
+        return (
+            f"Access denied. Employee {requester_id} "
+            f"is not authorized to access device information "
+            f"for {employee_id}."
+        )
 
     device = get_device_by_employee(employee_id)
 
