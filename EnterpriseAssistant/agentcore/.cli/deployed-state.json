@@ -15,6 +15,20 @@
             "memoryArn": "arn:aws:bedrock-agentcore:ap-south-1:202233310639:memory/EnterpriseAssistant_EnterpriseAssistantMemory-uRTgru2jQl"
           }
         },
+        "mcp": {
+          "gateways": {
+            "EnterpriseAssistantGateway": {
+              "gatewayId": "enterpriseassistant-enterpriseassistantgateway-e7knwkygor",
+              "gatewayArn": "arn:aws:bedrock-agentcore:ap-south-1:202233310639:gateway/enterpriseassistant-enterpriseassistantgateway-e7knwkygor",
+              "gatewayUrl": "https://enterpriseassistant-enterpriseassistantgateway-e7knwkygor.gateway.bedrock-agentcore.ap-south-1.amazonaws.com/mcp",
+              "targets": {
+                "ITTicketTarget": {
+                  "targetId": "JRKAWZ3PLG"
+                }
+              }
+            }
+          }
+        },
         "credentials": {
           "EnterpriseAssistantGemini": {
             "credentialProviderArn": "arn:aws:bedrock-agentcore:ap-south-1:202233310639:token-vault/default/apikeycredentialprovider/EnterpriseAssistantGemini"
@@ -22,7 +36,7 @@
         },
         "stackName": "AgentCore-EnterpriseAssistant-default",
         "identityKmsKeyArn": "arn:aws:kms:ap-south-1:202233310639:key/048cbd56-4216-4279-9fd1-cd84ddc1ac9c",
-        "deployHash": "6728b7088b55b0cc"
+        "deployHash": "6c44cb0d2e3375f5"
       }
     }
   }

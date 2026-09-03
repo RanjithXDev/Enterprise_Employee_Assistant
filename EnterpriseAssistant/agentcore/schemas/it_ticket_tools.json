@@ -1,0 +1,16 @@
+[
+  {
+    "name": "get_ticket_details",
+    "description": "Retrieve IT ticket details by ticket ID.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ticket_id": {
+          "type": "string",
+          "description": "The IT ticket ID, for example INC-1001."
+        }
+      },
+      "required": ["ticket_id"]
+    }
+  }
+]
