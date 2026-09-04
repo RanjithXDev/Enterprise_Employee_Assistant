@@ -11,11 +11,17 @@ from tools.it_tools import (
 )
 from tools.knowledge_tools import search_company_knowledge
 from mcp_client.gateway_client import create_gateway_mcp_client
+from strands_tools.browser import AgentCoreBrowser
 
 
 def create_it_agent(access_token: str):
 
     model = load_model()
+
+    browser_tool = AgentCoreBrowser(
+    region="ap-south-1",
+    identifier="EnterpriseAssistantBrowser-09gCURlBMD",
+   )
 
     gateway_mcp_client = create_gateway_mcp_client(access_token)
 
@@ -126,6 +132,23 @@ ITTicketTarget___get_ticket_details:
 - ITAdmins may retrieve tickets across employees.
 - Backend authorization is authoritative.
 
+BROWSER:
+
+You can use the AgentCore Browser tool when a request requires
+interacting with or retrieving information from a web page.
+
+Use the Browser tool for:
+- Navigating public web pages.
+- Reading information from web pages.
+- Checking current information available through an authorized web page.
+- Browser-based troubleshooting or support portal workflows when appropriate.
+
+Do not use the Browser tool when the required information is already
+available through enterprise tools or the Knowledge Base.
+
+Never claim that you browsed a page if the Browser tool was not used.
+Never fabricate information obtained from a web page.
+
 
 GENERAL RULES:
 
@@ -144,6 +167,7 @@ GENERAL RULES:
             update_it_ticket,
             close_it_ticket,
             search_company_knowledge,
+            browser_tool.browser,
             *gateway_tools,
         ],
     )
