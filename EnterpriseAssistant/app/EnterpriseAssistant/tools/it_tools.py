@@ -8,6 +8,7 @@ from services.ticket_service import (
     close_ticket,
 )
 
+from services.approval_service import create_approval
 import uuid
 
 
@@ -286,10 +287,10 @@ def close_it_ticket(
     user_role: str = "Employee",
 ) -> str:
     """
-    Close an existing IT ticket.
+    Request approval before closing an IT ticket.
 
-    Employees can close their own tickets.
-    ITAdmins can close tickets across employees.
+    Employees and ITAdmins must receive approval before
+    the ticket is actually closed.
     """
 
     ticket = get_ticket(ticket_id)
@@ -310,14 +311,27 @@ def close_it_ticket(
     if ticket["status"] == "Closed":
         return f"Ticket {ticket_id} is already closed."
 
-    closed_ticket = close_ticket(ticket_id)
-
-    if not closed_ticket:
-        return f"Unable to close ticket {ticket_id}."
+    approval = create_approval(
+        requester_id=requester_id,
+        user_role=user_role,
+        action="CLOSE_TICKET",
+        resource_id=ticket_id,
+        details={
+            "employee_id": ticket["employee_id"],
+            "title": ticket.get("title", ""),
+            "description": ticket.get("description", ""),
+            "current_status": ticket["status"],
+            "priority": ticket.get("priority", ""),
+        },
+    )
 
     return (
-        f"Ticket {ticket_id} closed successfully.\n"
+        "PENDING_APPROVAL\n"
+        f"Approval ID: {approval['approval_id']}\n"
+        f"Action: Close IT ticket {ticket_id}\n"
+        f"Employee ID: {ticket['employee_id']}\n"
         f"Requester ID: {requester_id}\n"
-        f"Employee ID: {closed_ticket['employee_id']}\n"
-        f"Status: {closed_ticket['status']}"
+        f"User Role: {user_role}\n"
+        "The ticket has NOT been closed. "
+        "Human approval is required before this action can be executed."
     )
