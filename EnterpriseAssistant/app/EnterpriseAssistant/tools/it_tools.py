@@ -1,21 +1,55 @@
 from strands import tool
 from services.device_service import get_device_by_employee
 from services.employee_service import get_employee
-from services.ticket_service import create_ticket,get_ticket,update_ticket, close_ticket
+from services.ticket_service import (
+    create_ticket,
+    get_ticket,
+    update_ticket,
+    close_ticket,
+)
+
 import uuid
 
+
+def _is_admin(user_role: str) -> bool:
+    """Return True only for the trusted ITAdmin role."""
+    return user_role == "ITAdmin"
+
+
+def _is_authorized(
+    requester_id: str,
+    resource_employee_id: str,
+    user_role: str,
+) -> bool:
+    """
+    Employees can access their own resources.
+    ITAdmins can manage resources across employees.
+    """
+
+    if _is_admin(user_role):
+        return True
+
+    return requester_id == resource_employee_id
 
 
 @tool
 def get_device_status(
     employee_id: str,
     requester_id: str,
+    user_role: str = "Employee",
 ) -> str:
     """
     Get the current device status for an employee.
+
+    Employees can access their own device.
+    ITAdmins can access devices for other employees.
     """
 
-    if requester_id != employee_id:
+    if not _is_authorized(
+        requester_id,
+        employee_id,
+        user_role,
+    ):
         return (
             f"Access denied. Employee {requester_id} "
             f"is not authorized to access device information "
@@ -40,16 +74,13 @@ def get_device_status(
 def get_employee_information(
     employee_id: str,
     requester_id: str,
+    user_role: str = "Employee",
 ) -> str:
     """
     Get employee information.
 
-    Authorization for sensitive employee information
-    must be enforced by the backend.
-
-    Args:
-        employee_id: Employee whose information is requested.
-        requester_id: Authenticated requester ID.
+    Employees can access their own information.
+    ITAdmins can access employee information for support purposes.
     """
 
     employee = get_employee(employee_id)
@@ -57,12 +88,15 @@ def get_employee_information(
     if not employee:
         return f"No employee found for employee {employee_id}."
 
-    # Temporary authorization logic.
-    # This will later be replaced with Cognito/backend authorization.
-    if requester_id != employee_id:
+    if not _is_authorized(
+        requester_id,
+        employee_id,
+        user_role,
+    ):
         return (
             f"Access denied. Employee {requester_id} "
-            f"is not authorized to access information for {employee_id}."
+            f"is not authorized to access information "
+            f"for {employee_id}."
         )
 
     return (
@@ -80,21 +114,20 @@ def create_it_ticket(
     title: str,
     description: str,
     requester_id: str,
+    user_role: str = "Employee",
 ) -> str:
     """
     Create an IT support ticket.
 
-    This tool will later invoke the AgentCore Gateway/MCP
-    create-ticket operation backed by AWS Lambda.
-
-    Args:
-        employee_id: Employee for whom the ticket is created.
-        title: Short description of the issue.
-        description: Detailed description of the issue.
-        requester_id: Authenticated requester ID.
+    Employees can create tickets for themselves.
+    ITAdmins can create tickets for employees.
     """
 
-    if requester_id != employee_id:
+    if not _is_authorized(
+        requester_id,
+        employee_id,
+        user_role,
+    ):
         return (
             f"Access denied. Employee {requester_id} "
             f"cannot create a ticket for employee {employee_id}."
@@ -104,8 +137,8 @@ def create_it_ticket(
 
     if not employee:
         return f"No employee found for employee {employee_id}."
-    
-    ticket_id  =f"INC-{uuid.uuid4().hex[:8].upper()}"
+
+    ticket_id = f"INC-{uuid.uuid4().hex[:8].upper()}"
 
     ticket = create_ticket(
         ticket_id=ticket_id,
@@ -114,6 +147,7 @@ def create_it_ticket(
         description=description,
         priority="Medium",
     )
+
     if not ticket:
         return f"Unable to create ticket for employee {employee_id}."
 
@@ -133,15 +167,13 @@ def create_it_ticket(
 def get_ticket_details(
     ticket_id: str,
     requester_id: str,
+    user_role: str = "Employee",
 ) -> str:
     """
     Get details of an IT ticket.
 
-    This operation will later use AgentCore Gateway/MCP.
-
-    Args:
-        ticket_id: Unique IT ticket identifier.
-        requester_id: Authenticated requester ID.
+    Employees can access their own tickets.
+    ITAdmins can access tickets across employees.
     """
 
     ticket = get_ticket(ticket_id)
@@ -149,9 +181,13 @@ def get_ticket_details(
     if not ticket:
         return f"No ticket found for ticket ID {ticket_id}."
 
-    if requester_id != ticket["employee_id"]:
+    if not _is_authorized(
+        requester_id,
+        ticket["employee_id"],
+        user_role,
+    ):
         return (
-            f"Access denied. Employee {requester_id}"
+            f"Access denied. Employee {requester_id} "
             f"is not authorized to access ticket {ticket_id}."
         )
 
@@ -173,15 +209,13 @@ def update_it_ticket(
     requester_id: str,
     status: str = "",
     priority: str = "",
+    user_role: str = "Employee",
 ) -> str:
     """
     Update an existing IT ticket.
 
-    Args:
-        ticket_id: Unique IT ticket identifier.
-        requester_id: Authenticated requester ID.
-        status: New ticket status.
-        priority: New ticket priority.
+    Employees can update their own tickets.
+    ITAdmins can update tickets across employees.
     """
 
     valid_statuses = {
@@ -210,18 +244,21 @@ def update_it_ticket(
             f"Valid priorities are: {', '.join(valid_priorities)}."
         )
 
-   
     ticket = get_ticket(ticket_id)
-    if not ticket:
-        return f"No ticket found for ticket ID {ticket_id}"
 
-    if requester_id != ticket['employee_id']:
+    if not ticket:
+        return f"No ticket found for ticket ID {ticket_id}."
+
+    if not _is_authorized(
+        requester_id,
+        ticket["employee_id"],
+        user_role,
+    ):
         return (
-            f"Access denied. Employee {requester_id}"
+            f"Access denied. Employee {requester_id} "
             f"is not authorized to update ticket {ticket_id}."
         )
 
-    
     if not status and not priority:
         return "No ticket changes were provided."
 
@@ -234,35 +271,37 @@ def update_it_ticket(
     if not updated_ticket:
         return f"Unable to update ticket {ticket_id}."
 
-
     return (
-        f"Ticket update request received for {ticket_id}.\n"
+        f"Ticket {ticket_id} updated successfully.\n"
         f"Requester ID: {requester_id}\n"
-        f"Status: {status or 'No change'}\n"
-        f"Priority: {priority or 'No change'}\n"
-        "Ticket update will be handled by "
-        "AgentCore Gateway → MCP → Lambda."
+        f"Status: {updated_ticket.get('status', 'Unknown')}\n"
+        f"Priority: {updated_ticket.get('priority', 'Unknown')}"
     )
+
 
 @tool
 def close_it_ticket(
     ticket_id: str,
     requester_id: str,
+    user_role: str = "Employee",
 ) -> str:
     """
     Close an existing IT ticket.
 
-    Args:
-        ticket_id: Unique IT ticket identifier.
-        requester_id: Authenticated requester ID.
+    Employees can close their own tickets.
+    ITAdmins can close tickets across employees.
     """
-    
+
     ticket = get_ticket(ticket_id)
 
     if not ticket:
         return f"No ticket found for ticket ID {ticket_id}."
 
-    if requester_id != ticket["employee_id"]:
+    if not _is_authorized(
+        requester_id,
+        ticket["employee_id"],
+        user_role,
+    ):
         return (
             f"Access denied. Employee {requester_id} "
             f"is not authorized to close ticket {ticket_id}."
@@ -276,10 +315,9 @@ def close_it_ticket(
     if not closed_ticket:
         return f"Unable to close ticket {ticket_id}."
 
-
     return (
-        f"Ticket closure request received for {ticket_id}.\n"
+        f"Ticket {ticket_id} closed successfully.\n"
         f"Requester ID: {requester_id}\n"
-        "Ticket closure will be handled by "
-        "AgentCore Gateway → MCP → Lambda."
+        f"Employee ID: {closed_ticket['employee_id']}\n"
+        f"Status: {closed_ticket['status']}"
     )

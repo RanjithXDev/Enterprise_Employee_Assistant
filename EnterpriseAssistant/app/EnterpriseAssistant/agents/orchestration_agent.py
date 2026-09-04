@@ -10,6 +10,7 @@ def create_orchestration_agent(
     actor_id: str,
     session_id: str,
     access_token: str,
+    user_role: str
 ):
     model = load_model()
 
@@ -30,6 +31,7 @@ def create_orchestration_agent(
         # actor_id is trusted application identity.
         delegated_request = (
             f"Requester ID: {actor_id}\n"
+            f"User Role: {user_role}\n"
             f"Request: {request}"
         )
 

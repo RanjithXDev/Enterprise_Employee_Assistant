@@ -1,7 +1,7 @@
 [
   {
     "name": "get_ticket_details",
-    "description": "Retrieve IT ticket details by ticket ID for an authorized employee.",
+    "description": "Retrieve IT ticket details by ticket ID for an authorized employee or IT administrator.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -11,10 +11,22 @@
         },
         "requester_id": {
           "type": "string",
-          "description": "Authenticated employee ID requesting the ticket."
+          "description": "Authenticated requester ID supplied by the application."
+        },
+        "user_role": {
+          "type": "string",
+          "enum": [
+            "Employee",
+            "ITAdmin"
+          ],
+          "description": "Authenticated user role supplied by the application."
         }
       },
-      "required": ["ticket_id", "requester_id"]
+      "required": [
+        "ticket_id",
+        "requester_id",
+        "user_role"
+      ]
     }
   }
 ]

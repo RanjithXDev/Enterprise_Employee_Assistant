@@ -168,11 +168,18 @@ async def invoke(payload, context):
             "Authenticated user is not associated with an employee ID"
         )
 
-    actor_id = authenticated_user.employee_id
+    actor_id = authenticated_user.employee_id or authenticated_user.username
+
+    user_role = (
+        "ITAdmin"
+        if authenticated_user.is_admin
+        else "Employee"
+    )
 
     log.info(
-        "Authenticated employee: %s, groups: %s",
+        "Authenticated employee: %s, groups: %s, groups: %s",
         actor_id,
+        user_role,
         authenticated_user.groups,
     )
 
@@ -184,6 +191,7 @@ async def invoke(payload, context):
         actor_id=actor_id,
         session_id=session_id,
         access_token=access_token,
+        user_role=user_role,
     )
 
     # ---------------------------------------------------------
