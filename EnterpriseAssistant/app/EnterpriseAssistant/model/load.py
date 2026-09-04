@@ -36,9 +36,17 @@
 #     )
 
 
+
+
 from strands.models.bedrock import BedrockModel
 
 
 def load_model() -> BedrockModel:
-    """Get Bedrock model client using IAM credentials."""
-    return BedrockModel(model_id="global.amazon.nova-2-lite-v1:0")
+    """Get Amazon Nova 2 Lite with Bedrock Guardrails."""
+
+    return BedrockModel(
+        model_id="global.amazon.nova-2-lite-v1:0",
+        guardrail_id="9dn7o0sr1d13",
+        guardrail_version="1",
+        guardrail_trace="enabled",
+    )
