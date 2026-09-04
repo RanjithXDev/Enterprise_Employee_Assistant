@@ -125,6 +125,41 @@ export class AgentCoreStack extends Stack {
     }
     this.application = new AgentCoreApplication(this, 'Application', appProps as any);
 
+
+    // Grant the AgentCore runtime access to existing application data stores.
+    // These DynamoDB tables already exist and are NOT managed by this CDK stack.
+    for (const env of this.application.environments.values()) {
+      env.runtime.role.addToPrincipalPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: [
+            'dynamodb:GetItem',
+            'dynamodb:Scan',
+            'dynamodb:PutItem',
+            'dynamodb:UpdateItem',
+          ],
+          resources: [
+            'arn:aws:dynamodb:ap-south-1:202233310639:table/EnterpriseEmployees',
+            'arn:aws:dynamodb:ap-south-1:202233310639:table/EnterpriseDevices',
+            'arn:aws:dynamodb:ap-south-1:202233310639:table/EnterpriseITTickets',
+            'arn:aws:dynamodb:ap-south-1:202233310639:table/EnterpriseHRLeave',
+          ],
+        }),
+      );
+
+      // Allow the runtime to retrieve documents from the Bedrock Knowledge Base.
+      env.runtime.role.addToPrincipalPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: [
+            'bedrock:Retrieve',
+          ],
+          resources: [
+            'arn:aws:bedrock:ap-south-1:202233310639:knowledge-base/7UDOWAFZE3',
+          ],
+        }),
+      );
+    }
     // Create AgentCoreMcp if there are gateways configured
     if (mcpSpec?.agentCoreGateways && mcpSpec.agentCoreGateways.length > 0) {
       new AgentCoreMcp(this, 'Mcp', {
