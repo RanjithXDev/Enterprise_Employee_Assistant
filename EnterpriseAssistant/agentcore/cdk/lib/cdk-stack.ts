@@ -153,9 +153,11 @@ export class AgentCoreStack extends Stack {
           effect: iam.Effect.ALLOW,
           actions: [
             'bedrock:Retrieve',
+            'bedrock:ApplyGuardrail',
           ],
           resources: [
             'arn:aws:bedrock:ap-south-1:202233310639:knowledge-base/7UDOWAFZE3',
+            'arn:aws:bedrock:ap-south-1:202233310639:guardrail/9dn7o0sr1d13',
           ],
         }),
       );

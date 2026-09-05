@@ -163,10 +163,8 @@ async def invoke(payload, context):
 
     authenticated_user = get_authenticated_user(access_token)
 
-    if not authenticated_user.employee_id:
-        raise ValueError(
-            "Authenticated user is not associated with an employee ID"
-        )
+    if not authenticated_user.employee_id and not authenticated_user.is_admin:
+        raise ValueError("Authenticated user is not associated with an employee ID")
 
     actor_id = authenticated_user.employee_id or authenticated_user.username
 
@@ -177,7 +175,7 @@ async def invoke(payload, context):
     )
 
     log.info(
-        "Authenticated employee: %s, groups: %s, groups: %s",
+        "Authenticated employee: %s, role: %s, groups: %s",
         actor_id,
         user_role,
         authenticated_user.groups,
