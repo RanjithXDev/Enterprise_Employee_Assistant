@@ -190,6 +190,7 @@ async def invoke(payload, context):
         session_id=session_id,
         access_token=access_token,
         user_role=user_role,
+        employee_id=authenticated_user.employee_id,
     )
 
     # ---------------------------------------------------------

@@ -47,6 +47,6 @@ def load_model() -> BedrockModel:
     return BedrockModel(
         model_id="global.amazon.nova-2-lite-v1:0",
         guardrail_id="9dn7o0sr1d13",
-        guardrail_version="1",
+        guardrail_version="2",
         guardrail_trace="enabled",
     )

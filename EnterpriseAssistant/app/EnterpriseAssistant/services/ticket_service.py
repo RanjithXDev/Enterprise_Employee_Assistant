@@ -133,6 +133,18 @@ def close_ticket(ticket_id: str):
     return response.get("Attributes")
     
 
+def list_all_tickets():
+    """
+    Get all IT tickets across all employees.
+    """
+
+    tickets_table = _get_tickets_table()
+
+    response = tickets_table.scan()
+
+    return response.get("Items", [])
+
+
 def get_tickets_by_employee(employee_id: str):
     """
     Get all IT tickets belonging to an employee.

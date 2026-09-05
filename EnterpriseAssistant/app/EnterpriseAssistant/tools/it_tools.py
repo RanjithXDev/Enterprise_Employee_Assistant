@@ -1,11 +1,12 @@
 from strands import tool
-from services.device_service import get_device_by_employee
+from services.device_service import get_device_by_employee, _get_devices_table
 from services.employee_service import get_employee
 from services.ticket_service import (
     create_ticket,
     get_ticket,
     update_ticket,
     close_ticket,
+    list_all_tickets as _list_all_tickets,
 )
 
 from services.approval_service import create_approval
@@ -33,305 +34,330 @@ def _is_authorized(
     return requester_id == resource_employee_id
 
 
-@tool
-def get_device_status(
-    employee_id: str,
-    requester_id: str,
-    user_role: str = "Employee",
-) -> str:
+def build_it_tools(requester_id: str, user_role: str) -> list:
     """
-    Get the current device status for an employee.
+    Build the IT tool set for one authenticated session.
 
-    Employees can access their own device.
-    ITAdmins can access devices for other employees.
+    requester_id/user_role are bound here from the trusted application
+    identity, NOT exposed as model-controlled tool arguments. A model
+    that forgets to pass a role/id on a given call can no longer
+    silently fall back to an unauthorized default.
     """
 
-    if not _is_authorized(
-        requester_id,
-        employee_id,
-        user_role,
-    ):
+    @tool
+    def get_device_status(employee_id: str) -> str:
+        """
+        Get the current device status for an employee.
+
+        Employees can access their own device.
+        ITAdmins can access devices for other employees.
+        """
+
+        if not _is_authorized(requester_id, employee_id, user_role):
+            return (
+                f"Access denied. Employee {requester_id} "
+                f"is not authorized to access device information "
+                f"for {employee_id}."
+            )
+
+        device = get_device_by_employee(employee_id)
+
+        if not device:
+            return f"No device found for employee {employee_id}."
+
         return (
-            f"Access denied. Employee {requester_id} "
-            f"is not authorized to access device information "
-            f"for {employee_id}."
+            f"Device ID: {device['device_id']}\n"
+            f"Device Type: {device['device_type']}\n"
+            f"Status: {device['status']}\n"
+            f"OS: {device['os']}\n"
+            f"Last Seen: {device['last_seen']}"
         )
 
-    device = get_device_by_employee(employee_id)
+    @tool
+    def get_employee_information(employee_id: str) -> str:
+        """
+        Get employee information.
 
-    if not device:
-        return f"No device found for employee {employee_id}."
+        Employees can access their own information.
+        ITAdmins can access employee information for support purposes.
+        """
 
-    return (
-        f"Device ID: {device['device_id']}\n"
-        f"Device Type: {device['device_type']}\n"
-        f"Status: {device['status']}\n"
-        f"OS: {device['os']}\n"
-        f"Last Seen: {device['last_seen']}"
-    )
+        employee = get_employee(employee_id)
 
+        if not employee:
+            return f"No employee found for employee {employee_id}."
 
-@tool
-def get_employee_information(
-    employee_id: str,
-    requester_id: str,
-    user_role: str = "Employee",
-) -> str:
-    """
-    Get employee information.
+        if not _is_authorized(requester_id, employee_id, user_role):
+            return (
+                f"Access denied. Employee {requester_id} "
+                f"is not authorized to access information "
+                f"for {employee_id}."
+            )
 
-    Employees can access their own information.
-    ITAdmins can access employee information for support purposes.
-    """
-
-    employee = get_employee(employee_id)
-
-    if not employee:
-        return f"No employee found for employee {employee_id}."
-
-    if not _is_authorized(
-        requester_id,
-        employee_id,
-        user_role,
-    ):
         return (
-            f"Access denied. Employee {requester_id} "
-            f"is not authorized to access information "
-            f"for {employee_id}."
+            f"Employee ID: {employee['employee_id']}\n"
+            f"Name: {employee['name']}\n"
+            f"Email: {employee['email']}\n"
+            f"Department: {employee['department']}\n"
+            f"Role: {employee['role']}"
         )
 
-    return (
-        f"Employee ID: {employee['employee_id']}\n"
-        f"Name: {employee['name']}\n"
-        f"Email: {employee['email']}\n"
-        f"Department: {employee['department']}\n"
-        f"Role: {employee['role']}"
-    )
+    @tool
+    def create_it_ticket(employee_id: str, title: str, description: str) -> str:
+        """
+        Create an IT support ticket.
 
+        Employees can create tickets for themselves.
+        ITAdmins can create tickets for employees.
+        """
 
-@tool
-def create_it_ticket(
-    employee_id: str,
-    title: str,
-    description: str,
-    requester_id: str,
-    user_role: str = "Employee",
-) -> str:
-    """
-    Create an IT support ticket.
+        if not _is_authorized(requester_id, employee_id, user_role):
+            return (
+                f"Access denied. Employee {requester_id} "
+                f"cannot create a ticket for employee {employee_id}."
+            )
 
-    Employees can create tickets for themselves.
-    ITAdmins can create tickets for employees.
-    """
+        employee = get_employee(employee_id)
 
-    if not _is_authorized(
-        requester_id,
-        employee_id,
-        user_role,
-    ):
-        return (
-            f"Access denied. Employee {requester_id} "
-            f"cannot create a ticket for employee {employee_id}."
+        if not employee:
+            return f"No employee found for employee {employee_id}."
+
+        ticket_id = f"INC-{uuid.uuid4().hex[:8].upper()}"
+
+        ticket = create_ticket(
+            ticket_id=ticket_id,
+            employee_id=employee_id,
+            title=title,
+            description=description,
+            priority="Medium",
         )
 
-    employee = get_employee(employee_id)
+        if not ticket:
+            return f"Unable to create ticket for employee {employee_id}."
 
-    if not employee:
-        return f"No employee found for employee {employee_id}."
-
-    ticket_id = f"INC-{uuid.uuid4().hex[:8].upper()}"
-
-    ticket = create_ticket(
-        ticket_id=ticket_id,
-        employee_id=employee_id,
-        title=title,
-        description=description,
-        priority="Medium",
-    )
-
-    if not ticket:
-        return f"Unable to create ticket for employee {employee_id}."
-
-    return (
-        "IT ticket details:\n"
-        f"Ticket ID: {ticket['ticket_id']}\n"
-        f"Employee ID: {ticket['employee_id']}\n"
-        f"Title: {ticket['title']}\n"
-        f"Description: {ticket['description']}\n"
-        f"Status: {ticket['status']}\n"
-        f"Priority: {ticket['priority']}\n"
-        f"Created At: {ticket['created_at']}"
-    )
-
-
-@tool
-def get_ticket_details(
-    ticket_id: str,
-    requester_id: str,
-    user_role: str = "Employee",
-) -> str:
-    """
-    Get details of an IT ticket.
-
-    Employees can access their own tickets.
-    ITAdmins can access tickets across employees.
-    """
-
-    ticket = get_ticket(ticket_id)
-
-    if not ticket:
-        return f"No ticket found for ticket ID {ticket_id}."
-
-    if not _is_authorized(
-        requester_id,
-        ticket["employee_id"],
-        user_role,
-    ):
         return (
-            f"Access denied. Employee {requester_id} "
-            f"is not authorized to access ticket {ticket_id}."
+            "IT ticket details:\n"
+            f"Ticket ID: {ticket['ticket_id']}\n"
+            f"Employee ID: {ticket['employee_id']}\n"
+            f"Title: {ticket['title']}\n"
+            f"Description: {ticket['description']}\n"
+            f"Status: {ticket['status']}\n"
+            f"Priority: {ticket['priority']}\n"
+            f"Created At: {ticket['created_at']}"
         )
 
-    return (
-        "IT ticket details:\n"
-        f"Ticket ID: {ticket['ticket_id']}\n"
-        f"Employee ID: {ticket['employee_id']}\n"
-        f"Title: {ticket['title']}\n"
-        f"Description: {ticket['description']}\n"
-        f"Status: {ticket['status']}\n"
-        f"Priority: {ticket['priority']}\n"
-        f"Created At: {ticket['created_at']}"
-    )
+    @tool
+    def get_ticket_details(ticket_id: str) -> str:
+        """
+        Get details of an IT ticket.
 
+        Employees can access their own tickets.
+        ITAdmins can access tickets across employees.
+        """
 
-@tool
-def update_it_ticket(
-    ticket_id: str,
-    requester_id: str,
-    status: str = "",
-    priority: str = "",
-    user_role: str = "Employee",
-) -> str:
-    """
-    Update an existing IT ticket.
+        ticket = get_ticket(ticket_id)
 
-    Employees can update their own tickets.
-    ITAdmins can update tickets across employees.
-    """
+        if not ticket:
+            return f"No ticket found for ticket ID {ticket_id}."
 
-    valid_statuses = {
-        "Open",
-        "In Progress",
-        "Resolved",
-        "Closed",
-    }
+        if not _is_authorized(requester_id, ticket["employee_id"], user_role):
+            return (
+                f"Access denied. Employee {requester_id} "
+                f"is not authorized to access ticket {ticket_id}."
+            )
 
-    valid_priorities = {
-        "Low",
-        "Medium",
-        "High",
-        "Critical",
-    }
-
-    if status and status not in valid_statuses:
         return (
-            f"Invalid status '{status}'. "
-            f"Valid statuses are: {', '.join(valid_statuses)}."
+            "IT ticket details:\n"
+            f"Ticket ID: {ticket['ticket_id']}\n"
+            f"Employee ID: {ticket['employee_id']}\n"
+            f"Title: {ticket['title']}\n"
+            f"Description: {ticket['description']}\n"
+            f"Status: {ticket['status']}\n"
+            f"Priority: {ticket['priority']}\n"
+            f"Created At: {ticket['created_at']}"
         )
 
-    if priority and priority not in valid_priorities:
-        return (
-            f"Invalid priority '{priority}'. "
-            f"Valid priorities are: {', '.join(valid_priorities)}."
+    @tool
+    def update_it_ticket(
+        ticket_id: str,
+        status: str = "",
+        priority: str = "",
+    ) -> str:
+        """
+        Update an existing IT ticket.
+
+        Employees can update their own tickets.
+        ITAdmins can update tickets across employees.
+        """
+
+        valid_statuses = {
+            "Open",
+            "In Progress",
+            "Resolved",
+            "Closed",
+        }
+
+        valid_priorities = {
+            "Low",
+            "Medium",
+            "High",
+            "Critical",
+        }
+
+        if status and status not in valid_statuses:
+            return (
+                f"Invalid status '{status}'. "
+                f"Valid statuses are: {', '.join(valid_statuses)}."
+            )
+
+        if priority and priority not in valid_priorities:
+            return (
+                f"Invalid priority '{priority}'. "
+                f"Valid priorities are: {', '.join(valid_priorities)}."
+            )
+
+        ticket = get_ticket(ticket_id)
+
+        if not ticket:
+            return f"No ticket found for ticket ID {ticket_id}."
+
+        if not _is_authorized(requester_id, ticket["employee_id"], user_role):
+            return (
+                f"Access denied. Employee {requester_id} "
+                f"is not authorized to update ticket {ticket_id}."
+            )
+
+        if not status and not priority:
+            return "No ticket changes were provided."
+
+        updated_ticket = update_ticket(
+            ticket_id=ticket_id,
+            status=status or None,
+            priority=priority or None,
         )
 
-    ticket = get_ticket(ticket_id)
+        if not updated_ticket:
+            return f"Unable to update ticket {ticket_id}."
 
-    if not ticket:
-        return f"No ticket found for ticket ID {ticket_id}."
-
-    if not _is_authorized(
-        requester_id,
-        ticket["employee_id"],
-        user_role,
-    ):
         return (
-            f"Access denied. Employee {requester_id} "
-            f"is not authorized to update ticket {ticket_id}."
+            f"Ticket {ticket_id} updated successfully.\n"
+            f"Requester ID: {requester_id}\n"
+            f"Status: {updated_ticket.get('status', 'Unknown')}\n"
+            f"Priority: {updated_ticket.get('priority', 'Unknown')}"
         )
 
-    if not status and not priority:
-        return "No ticket changes were provided."
+    @tool
+    def close_it_ticket(ticket_id: str) -> str:
+        """
+        Request approval before closing an IT ticket.
 
-    updated_ticket = update_ticket(
-        ticket_id=ticket_id,
-        status=status or None,
-        priority=priority or None,
-    )
+        Employees and ITAdmins must receive approval before
+        the ticket is actually closed.
+        """
 
-    if not updated_ticket:
-        return f"Unable to update ticket {ticket_id}."
+        ticket = get_ticket(ticket_id)
 
-    return (
-        f"Ticket {ticket_id} updated successfully.\n"
-        f"Requester ID: {requester_id}\n"
-        f"Status: {updated_ticket.get('status', 'Unknown')}\n"
-        f"Priority: {updated_ticket.get('priority', 'Unknown')}"
-    )
+        if not ticket:
+            return f"No ticket found for ticket ID {ticket_id}."
 
+        if not _is_authorized(requester_id, ticket["employee_id"], user_role):
+            return (
+                f"Access denied. Employee {requester_id} "
+                f"is not authorized to close ticket {ticket_id}."
+            )
 
-@tool
-def close_it_ticket(
-    ticket_id: str,
-    requester_id: str,
-    user_role: str = "Employee",
-) -> str:
-    """
-    Request approval before closing an IT ticket.
+        if ticket["status"] == "Closed":
+            return f"Ticket {ticket_id} is already closed."
 
-    Employees and ITAdmins must receive approval before
-    the ticket is actually closed.
-    """
-
-    ticket = get_ticket(ticket_id)
-
-    if not ticket:
-        return f"No ticket found for ticket ID {ticket_id}."
-
-    if not _is_authorized(
-        requester_id,
-        ticket["employee_id"],
-        user_role,
-    ):
-        return (
-            f"Access denied. Employee {requester_id} "
-            f"is not authorized to close ticket {ticket_id}."
+        approval = create_approval(
+            requester_id=requester_id,
+            user_role=user_role,
+            action="CLOSE_TICKET",
+            resource_id=ticket_id,
+            details={
+                "employee_id": ticket["employee_id"],
+                "title": ticket.get("title", ""),
+                "description": ticket.get("description", ""),
+                "current_status": ticket["status"],
+                "priority": ticket.get("priority", ""),
+            },
         )
 
-    if ticket["status"] == "Closed":
-        return f"Ticket {ticket_id} is already closed."
+        return (
+            "PENDING_APPROVAL\n"
+            f"Approval ID: {approval['approval_id']}\n"
+            f"Action: Close IT ticket {ticket_id}\n"
+            f"Employee ID: {ticket['employee_id']}\n"
+            f"Requester ID: {requester_id}\n"
+            f"User Role: {user_role}\n"
+            "The ticket has NOT been closed. "
+            "Human approval is required before this action can be executed."
+        )
 
-    approval = create_approval(
-        requester_id=requester_id,
-        user_role=user_role,
-        action="CLOSE_TICKET",
-        resource_id=ticket_id,
-        details={
-            "employee_id": ticket["employee_id"],
-            "title": ticket.get("title", ""),
-            "description": ticket.get("description", ""),
-            "current_status": ticket["status"],
-            "priority": ticket.get("priority", ""),
-        },
-    )
+    @tool
+    def list_all_devices() -> str:
+        """
+        List all enterprise devices.
+        Only ITAdmin users are authorized to use this operation.
+        """
+        if not _is_admin(user_role):
+            return "Access denied. Only ITAdmin users can list all devices."
 
-    return (
-        "PENDING_APPROVAL\n"
-        f"Approval ID: {approval['approval_id']}\n"
-        f"Action: Close IT ticket {ticket_id}\n"
-        f"Employee ID: {ticket['employee_id']}\n"
-        f"Requester ID: {requester_id}\n"
-        f"User Role: {user_role}\n"
-        "The ticket has NOT been closed. "
-        "Human approval is required before this action can be executed."
-    )
+        devices_table = _get_devices_table()
+
+        response = devices_table.scan()
+        devices = response.get("Items", [])
+
+        if not devices:
+            return "No devices were found."
+
+        lines = ["Enterprise Devices:"]
+
+        for device in devices:
+            lines.append(
+                f"- Device ID: {device.get('device_id', 'N/A')}, "
+                f"Employee ID: {device.get('employee_id', 'N/A')}, "
+                f"Type: {device.get('device_type', 'N/A')}, "
+                f"Status: {device.get('status', 'N/A')}, "
+                f"OS: {device.get('os', 'N/A')}"
+            )
+
+        return "\n".join(lines)
+
+    @tool
+    def list_all_tickets() -> str:
+        """
+        List all IT tickets across all employees.
+        Only ITAdmin users are authorized to use this operation.
+        """
+        if not _is_admin(user_role):
+            return "Access denied. Only ITAdmin users can list all tickets."
+
+        tickets = _list_all_tickets()
+
+        if not tickets:
+            return "No tickets were found."
+
+        lines = ["Enterprise IT Tickets:"]
+
+        for ticket in tickets:
+            lines.append(
+                f"- Ticket ID: {ticket.get('ticket_id', 'N/A')}, "
+                f"Employee ID: {ticket.get('employee_id', 'N/A')}, "
+                f"Title: {ticket.get('title', 'N/A')}, "
+                f"Status: {ticket.get('status', 'N/A')}, "
+                f"Priority: {ticket.get('priority', 'N/A')}"
+            )
+
+        return "\n".join(lines)
+
+    return [
+        get_device_status,
+        get_employee_information,
+        create_it_ticket,
+        get_ticket_details,
+        update_it_ticket,
+        close_it_ticket,
+        list_all_devices,
+        list_all_tickets,
+    ]
