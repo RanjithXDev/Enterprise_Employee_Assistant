@@ -13,6 +13,14 @@ app = BedrockAgentCoreApp()
 log = app.logger
 
 
+def _get_usage_value(usage: Any, key: str) -> int:
+    """Read a token usage value from either a dict or an object."""
+    if isinstance(usage, dict):
+        return int(usage.get(key, 0) or 0)
+
+    return int(getattr(usage, key, 0) or 0)
+
+
 def strip_trailing_tool_use(messages: Any) -> list[dict]:
     """Strip toolUse blocks from the tail until the last message has none."""
     if not isinstance(messages, list):
@@ -163,10 +171,18 @@ async def invoke(payload, context):
 
     authenticated_user = get_authenticated_user(access_token)
 
-    if not authenticated_user.employee_id and not authenticated_user.is_admin:
-        raise ValueError("Authenticated user is not associated with an employee ID")
+    if (
+        not authenticated_user.employee_id
+        and not authenticated_user.is_admin
+    ):
+        raise ValueError(
+            "Authenticated user is not associated with an employee ID"
+        )
 
-    actor_id = authenticated_user.employee_id or authenticated_user.username
+    actor_id = (
+        authenticated_user.employee_id
+        or authenticated_user.username
+    )
 
     user_role = (
         "ITAdmin"
@@ -175,14 +191,25 @@ async def invoke(payload, context):
     )
 
     log.info(
-        "Authenticated employee: %s, role: %s, groups: %s",
+        "Authenticated Requester: %s, role: %s, groups: %s",
         actor_id,
         user_role,
         authenticated_user.groups,
     )
 
     # ---------------------------------------------------------
-    # 4. Create the Orchestration Agent
+    # 4. Initialize observability
+    # ---------------------------------------------------------
+
+    observability = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "tools": [],
+    }
+
+    # ---------------------------------------------------------
+    # 5. Create the Orchestration Agent
     # ---------------------------------------------------------
 
     agent = create_orchestration_agent(
@@ -191,22 +218,130 @@ async def invoke(payload, context):
         access_token=access_token,
         user_role=user_role,
         employee_id=authenticated_user.employee_id,
+        observability=observability,
     )
 
     # ---------------------------------------------------------
-    # 5. Extract the employee request
+    # 6. Extract the user request
     # ---------------------------------------------------------
 
     prompt = _extract_prompt(payload)
 
     # ---------------------------------------------------------
-    # 6. Stream the Orchestration Agent response
+    # 7. Stream the Orchestration Agent response
+    #    and collect observability metrics
     # ---------------------------------------------------------
 
     async for event in agent.stream_async(prompt):
 
         if not isinstance(event, dict):
             continue
+
+        # ---------------------------------------------
+        # Final AgentResult
+        # ---------------------------------------------
+
+        result = event.get("result")
+
+        if result is not None:
+            metrics = getattr(result, "metrics", None)
+
+            if metrics is not None:
+
+                # -----------------------------------------
+                # Token usage
+                # -----------------------------------------
+
+                usage = getattr(
+                    metrics,
+                    "accumulated_usage",
+                    None,
+                )
+
+                if usage is not None:
+                    input_tokens = _get_usage_value(
+                        usage,
+                        "inputTokens",
+                    )
+
+                    output_tokens = _get_usage_value(
+                        usage,
+                        "outputTokens",
+                    )
+
+                    total_tokens = _get_usage_value(
+                        usage,
+                        "totalTokens",
+                    )
+
+                    observability["input_tokens"] += input_tokens
+                    observability["output_tokens"] += output_tokens
+                    observability["total_tokens"] += total_tokens
+
+                    log.info(
+                        "Token usage: input=%s output=%s total=%s",
+                        input_tokens,
+                        output_tokens,
+                        total_tokens,
+                    )
+
+                # -----------------------------------------
+                # Tool metrics
+                # -----------------------------------------
+
+                tool_metrics = getattr(
+                    metrics,
+                    "tool_metrics",
+                    {},
+                ) or {}
+
+                for tool_name, tool_metric in tool_metrics.items():
+
+                    tool_record = {
+                        "name": tool_name,
+                        "calls": getattr(
+                            tool_metric,
+                            "call_count",
+                            0,
+                        ),
+                        "success": getattr(
+                            tool_metric,
+                            "success_count",
+                            0,
+                        ),
+                        "errors": getattr(
+                            tool_metric,
+                            "error_count",
+                            0,
+                        ),
+                        "duration": getattr(
+                            tool_metric,
+                            "total_time",
+                            0,
+                        ),
+                    }
+
+                    observability["tools"].append(
+                        tool_record
+                    )
+
+                    log.info(
+                        "Tool metrics: name=%s calls=%s "
+                        "success=%s errors=%s duration=%s",
+                        tool_name,
+                        tool_record["calls"],
+                        tool_record["success"],
+                        tool_record["errors"],
+                        tool_record["duration"],
+                    )
+
+            # IMPORTANT:
+            # Do not yield the raw AgentResult.
+            continue
+
+        # ---------------------------------------------
+        # Preserve normal streaming events
+        # ---------------------------------------------
 
         if "event" not in event:
             continue
@@ -217,6 +352,15 @@ async def invoke(payload, context):
             continue
 
         yield event
+
+    # ---------------------------------------------------------
+    # 8. Log observability
+    # ---------------------------------------------------------
+
+    log.info(
+        "Final observability: %s",
+        observability,
+    )
 
 
 if __name__ == "__main__":

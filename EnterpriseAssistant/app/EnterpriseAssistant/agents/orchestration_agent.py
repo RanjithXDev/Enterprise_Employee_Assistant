@@ -1,4 +1,5 @@
 import re
+from typing import Any
 
 from strands import Agent, tool
 
@@ -36,6 +37,7 @@ def create_orchestration_agent(
     access_token: str,
     user_role: str,
     employee_id: str | None = None,
+    observability: dict[str, Any] | None = None,
 ):
     model = load_model()
 
@@ -45,10 +47,128 @@ def create_orchestration_agent(
     # An ITAdmin account has no employee record (employee_id is None).
     has_employee_record = bool(employee_id)
 
+    if observability is None:
+        observability = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "tools": [],
+        }
+
+    # ---------------------------------------------------------
+    # Record metrics from delegated HR / IT agents
+    # ---------------------------------------------------------
+
+    def record_agent_metrics(result):
+        metrics = getattr(result, "metrics", None)
+
+        if metrics is None:
+            return
+
+        usage = getattr(
+            metrics,
+            "accumulated_usage",
+            {},
+        ) or {}
+
+        observability["input_tokens"] += int(
+            usage.get("inputTokens", 0) or 0
+        )
+
+        observability["output_tokens"] += int(
+            usage.get("outputTokens", 0) or 0
+        )
+
+        observability["total_tokens"] += int(
+            usage.get("totalTokens", 0) or 0
+        )
+
+        tool_metrics = getattr(
+            metrics,
+            "tool_metrics",
+            {},
+        ) or {}
+
+        for tool_name, tool_metric in tool_metrics.items():
+            observability["tools"].append(
+                {
+                    "name": tool_name,
+                    "calls": getattr(
+                        tool_metric,
+                        "call_count",
+                        0,
+                    ),
+                    "success": getattr(
+                        tool_metric,
+                        "success_count",
+                        0,
+                    ),
+                    "errors": getattr(
+                        tool_metric,
+                        "error_count",
+                        0,
+                    ),
+                    "duration": getattr(
+                        tool_metric,
+                        "total_time",
+                        0,
+                    ),
+                }
+            )
+
+    # ---------------------------------------------------------
+    # Extract only assistant text from AgentResult
+    # ---------------------------------------------------------
+
+    def extract_agent_text(result) -> str:
+        """
+        Extract only the assistant response text from AgentResult.
+
+        This prevents internal AgentResult objects, metrics,
+        traces, and implementation details from being returned
+        to the user.
+        """
+
+        message = getattr(
+            result,
+            "message",
+            None,
+        )
+
+        if not isinstance(message, dict):
+            return str(result)
+
+        content = message.get(
+            "content",
+            [],
+        )
+
+        if not isinstance(content, list):
+            return str(result)
+
+        text_parts = []
+
+        for block in content:
+            if isinstance(block, dict):
+                text = block.get("text")
+
+                if isinstance(text, str) and text:
+                    text_parts.append(text)
+
+        if text_parts:
+            return "\n".join(text_parts)
+
+        return str(result)
+
+    # ---------------------------------------------------------
+    # IT Agent delegation tool
+    # ---------------------------------------------------------
+
     @tool
     def ask_it_agent(request: str) -> str:
         """
         Delegate an IT request to the IT Support Agent.
+
         The authenticated requester identity is supplied by the
         orchestration layer and is never taken from the user's request.
         """
@@ -65,25 +185,49 @@ def create_orchestration_agent(
 
         # Identity is established via the sub-agent's system prompt at
         # creation time (see create_it_agent), never via the user-turn
-        # text. Embedding "Requester ID: ...\nUser Role: ITAdmin" inside
-        # the user message reads like a role-escalation / prompt-injection
-        # attempt to the Bedrock Guardrail's PROMPT_ATTACK filter and gets
-        # blocked, so only the plain request is sent here.
+        # text.
+
+        # Do NOT embed:
+        #
+        # Requester ID: ...
+        # User Role: ...
+        #
+        # inside the user message because the Bedrock Guardrail can
+        # interpret this as a prompt-injection / role-escalation attempt.
+        #
+        # Identity is already supplied to create_it_agent().
+
         it_agent, gateway_mcp_client = create_it_agent(
-            access_token, actor_id, user_role
+            access_token,
+            actor_id,
+            user_role,
         )
 
         try:
             response = it_agent(request)
-            return str(response)
+
+            # Record nested IT Agent metrics.
+            record_agent_metrics(response)
+
+            # Return only the assistant's actual response text.
+            return extract_agent_text(response)
 
         finally:
-            gateway_mcp_client.__exit__(None, None, None)
+            gateway_mcp_client.__exit__(
+                None,
+                None,
+                None,
+            )
+
+    # ---------------------------------------------------------
+    # HR Agent delegation tool
+    # ---------------------------------------------------------
 
     @tool
     def ask_hr_agent(request: str) -> str:
         """
         Delegate an HR request to the HR Support Agent.
+
         The authenticated requester identity is supplied by the
         orchestration layer.
         """
@@ -98,17 +242,29 @@ def create_orchestration_agent(
         ):
             return NO_EMPLOYEE_RECORD_MESSAGE
 
-        # See ask_it_agent: identity lives in the sub-agent's system
-        # prompt, not in the user-turn text passed to it.
+        # Identity lives in the HR Agent's system prompt.
+        # Do not embed requester identity inside the user request.
+
         response = hr_agent(request)
 
-        return str(response)
+        # Record nested HR Agent metrics.
+        record_agent_metrics(response)
 
-    # Use the centralized AgentCore Memory configuration.
+        # Return only the assistant's actual response text.
+        return extract_agent_text(response)
+
+    # ---------------------------------------------------------
+    # AgentCore Memory
+    # ---------------------------------------------------------
+
     session_manager = get_memory_session_manager(
         session_id=session_id,
         actor_id=actor_id,
     )
+
+    # ---------------------------------------------------------
+    # Orchestration Agent
+    # ---------------------------------------------------------
 
     orchestration_agent = Agent(
         model=model,
