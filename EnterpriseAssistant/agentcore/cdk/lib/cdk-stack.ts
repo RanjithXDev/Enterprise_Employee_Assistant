@@ -137,12 +137,14 @@ export class AgentCoreStack extends Stack {
             'dynamodb:Scan',
             'dynamodb:PutItem',
             'dynamodb:UpdateItem',
+            'dynamodb:Query',
           ],
           resources: [
             'arn:aws:dynamodb:ap-south-1:202233310639:table/EnterpriseEmployees',
             'arn:aws:dynamodb:ap-south-1:202233310639:table/EnterpriseDevices',
             'arn:aws:dynamodb:ap-south-1:202233310639:table/EnterpriseITTickets',
             'arn:aws:dynamodb:ap-south-1:202233310639:table/EnterpriseHRLeave',
+            'arn:aws:dynamodb:ap-south-1:202233310639:table/EnterpriseAssistantConversations',
           ],
         }),
       );

@@ -255,10 +255,24 @@ def build_it_tools(requester_id: str, user_role: str) -> list:
         the ticket is actually closed.
         """
 
+        print(
+            f"[HITL DEBUG] "
+            f"requester_id={requester_id}, "
+            f"user_role={user_role}, "
+            f"ticket_id={ticket_id}"
+        )
+
         ticket = get_ticket(ticket_id)
 
         if not ticket:
             return f"No ticket found for ticket ID {ticket_id}."
+        
+        print(
+            f"[HITL DEBUG] "
+            f"ticket_employee_id={ticket['employee_id']}, "
+            f"requester_id={requester_id}, "
+            f"user_role={user_role}"
+        )
 
         if not _is_authorized(requester_id, ticket["employee_id"], user_role):
             return (

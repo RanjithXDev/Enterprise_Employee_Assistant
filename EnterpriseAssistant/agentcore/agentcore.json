@@ -24,7 +24,8 @@
         "customJwtAuthorizer": {
           "discoveryUrl": "https://cognito-idp.ap-south-1.amazonaws.com/ap-south-1_T86CfXMhC/.well-known/openid-configuration",
           "allowedClients": [
-            "228vq570b9j3di3qjb00hsnsc7"
+            "228vq570b9j3di3qjb00hsnsc7",
+            "akf4uc1kgl13osffu8ln52o5c"
           ]
         }
       }
@@ -94,11 +95,12 @@
         "customJwtAuthorizer": {
           "discoveryUrl": "https://cognito-idp.ap-south-1.amazonaws.com/ap-south-1_T86CfXMhC/.well-known/openid-configuration",
           "allowedClients": [
-            "228vq570b9j3di3qjb00hsnsc7"
+            "228vq570b9j3di3qjb00hsnsc7",
+            "akf4uc1kgl13osffu8ln52o5c"
           ]
         }
       },
-      "enableSemanticSearch": true,
+      "enableSemanticSearch": false,
       "exceptionLevel": "NONE"
     }
   ],

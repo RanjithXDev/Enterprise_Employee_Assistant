@@ -36,7 +36,7 @@
         },
         "stackName": "AgentCore-EnterpriseAssistant-default",
         "identityKmsKeyArn": "arn:aws:kms:ap-south-1:202233310639:key/048cbd56-4216-4279-9fd1-cd84ddc1ac9c",
-        "deployHash": "6c44cb0d2e3375f5"
+        "deployHash": "f9d4b3b16c882e07"
       }
     }
   }

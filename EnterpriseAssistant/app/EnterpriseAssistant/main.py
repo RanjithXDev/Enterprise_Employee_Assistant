@@ -1,4 +1,5 @@
 from typing import Any
+import uuid
 
 from bedrock_agentcore.runtime import (
     BedrockAgentCoreApp,
@@ -7,6 +8,11 @@ from bedrock_agentcore.runtime import (
 
 from agents.orchestration_agent import create_orchestration_agent
 from services.auth_service import get_authenticated_user
+from services.conversation_service import (
+    create_conversation,
+    get_conversation,
+    touch_conversation,
+)
 
 
 app = BedrockAgentCoreApp()
@@ -159,11 +165,25 @@ async def invoke(payload, context):
     # 2. Get AgentCore Runtime session ID
     # ---------------------------------------------------------
 
+    request_session_id = None
+
+    if isinstance(payload, dict):
+        request_session_id = payload.get("session_id")
+
+    if request_session_id is not None and not isinstance(
+        request_session_id,
+        str,
+    ):
+        raise ValueError("session_id must be a string")
+
     session_id = (
         BedrockAgentCoreContext.get_session_id()
         or getattr(context, "session_id", None)
-        or "default-session"
+        or request_session_id
     )
+
+    if not session_id:
+        session_id = uuid.uuid4().hex
 
     # ---------------------------------------------------------
     # 3. Resolve authenticated Cognito user
@@ -190,6 +210,41 @@ async def invoke(payload, context):
         else "Employee"
     )
 
+    # ---------------------------------------------------------
+    # 4. Extract the user request
+    # ---------------------------------------------------------
+
+    prompt = _extract_prompt(payload)
+
+    # ---------------------------------------------------------
+    # 5. Create / get conversation metadata
+    # ---------------------------------------------------------
+
+    conversation = get_conversation(
+        actor_id=actor_id,
+        session_id=session_id,
+    )
+
+    if conversation is None:
+
+        # Use the first user prompt as the conversation title.
+        if isinstance(prompt, str):
+            title = prompt.strip()
+        else:
+            title = "New Conversation"
+
+        if not title:
+            title = "New Conversation"
+
+        # Keep the sidebar title short.
+        title = title[:80]
+
+        conversation = create_conversation(
+            actor_id=actor_id,
+            session_id=session_id,
+            title=title,
+        )
+
     log.info(
         "Authenticated Requester: %s, role: %s, groups: %s",
         actor_id,
@@ -198,7 +253,7 @@ async def invoke(payload, context):
     )
 
     # ---------------------------------------------------------
-    # 4. Initialize observability
+    # 6. Initialize observability
     # ---------------------------------------------------------
 
     observability = {
@@ -209,7 +264,7 @@ async def invoke(payload, context):
     }
 
     # ---------------------------------------------------------
-    # 5. Create the Orchestration Agent
+    # 7. Create the Orchestration Agent
     # ---------------------------------------------------------
 
     agent = create_orchestration_agent(
@@ -222,13 +277,7 @@ async def invoke(payload, context):
     )
 
     # ---------------------------------------------------------
-    # 6. Extract the user request
-    # ---------------------------------------------------------
-
-    prompt = _extract_prompt(payload)
-
-    # ---------------------------------------------------------
-    # 7. Stream the Orchestration Agent response
+    # 8. Stream the Orchestration Agent response
     #    and collect observability metrics
     # ---------------------------------------------------------
 
@@ -354,13 +403,29 @@ async def invoke(payload, context):
         yield event
 
     # ---------------------------------------------------------
-    # 8. Log observability
+    # 9. Update conversation timestamp
+    # ---------------------------------------------------------
+
+    touch_conversation(
+        actor_id=actor_id,
+        session_id=session_id,
+    )
+
+    # ---------------------------------------------------------
+    # 10. Log and emit observability
     # ---------------------------------------------------------
 
     log.info(
         "Final observability: %s",
         observability,
     )
+
+    yield {
+        "conversation": {
+            "session_id": session_id,
+        },
+        "observability": observability,
+    }
 
 
 if __name__ == "__main__":
