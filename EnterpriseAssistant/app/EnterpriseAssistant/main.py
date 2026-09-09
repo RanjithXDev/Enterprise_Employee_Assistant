@@ -177,9 +177,9 @@ async def invoke(payload, context):
         raise ValueError("session_id must be a string")
 
     session_id = (
-        BedrockAgentCoreContext.get_session_id()
+        request_session_id
+        or BedrockAgentCoreContext.get_session_id()
         or getattr(context, "session_id", None)
-        or request_session_id
     )
 
     if not session_id:
