@@ -1,0 +1,73 @@
+sequenceDiagram
+    autonumber
+    actor User as Employee / IT Admin
+    participant FE as Frontend (React)
+    participant Cognito as Cognito (Auth)
+    participant APIGW as API Gateway
+    participant Lambda as Lambda
+    participant Sup as Supervisor Agent
+    participant ITAg as IT Agent
+    participant HRAg as HR Agent
+    participant ITTools as IT Tools
+    participant ITKB as IT KB
+    participant MCP as MCP (Ticket System)
+    participant HRTools as HR Tools
+    participant HRKB as HR KB
+    participant S3 as Knowledge Base (S3)
+    participant DDB as DynamoDB
+    participant CW as CloudWatch
+
+    %% ===== AUTH =====
+    User->>FE: Open app / login
+    FE->>Cognito: Authenticate user
+    Cognito-->>FE: Auth token (session)
+
+    %% ===== REQUEST =====
+    User->>FE: Ask question / raise ticket
+    FE->>APIGW: HTTPS request (with token)
+    APIGW->>Lambda: Forward request
+    Lambda->>Sup: Invoke Supervisor Agent
+
+    %% ===== ROUTING =====
+    alt IT-related request
+        Sup->>ITAg: Route to IT Agent
+        ITAg->>ITTools: Call IT tool(s)
+        ITTools-->>ITAg: Tool result
+        ITAg->>ITKB: Query knowledge base
+        ITKB->>S3: Retrieve IT/company docs
+        S3-->>ITKB: Relevant docs
+        ITKB-->>ITAg: KB context
+        ITAg->>MCP: Create/update ticket
+        MCP->>DDB: Write to Tickets table
+        DDB-->>MCP: Ack
+        MCP-->>ITAg: Ticket confirmation
+        ITAg-->>Sup: IT Agent response
+    else HR-related request
+        Sup->>HRAg: Route to HR Agent
+        HRAg->>HRTools: Call HR tool(s)
+        HRTools-->>HRAg: Tool result
+        HRAg->>HRKB: Query knowledge base
+        HRKB->>S3: Retrieve HR policy docs
+        S3-->>HRKB: Relevant docs
+        HRKB-->>HRAg: KB context
+        HRAg->>DDB: Read/write Leave / Approvals
+        DDB-->>HRAg: Data result
+        HRAg-->>Sup: HR Agent response
+    end
+
+    %% ===== MEMORY / CONVERSATION LOG =====
+    Sup->>DDB: Write Conversations / Employees context
+    DDB-->>Sup: Ack
+
+    %% ===== RESPONSE =====
+    Sup-->>Lambda: Aggregated agent response
+    Lambda-->>APIGW: Response payload
+    APIGW-->>FE: Response
+    FE-->>User: Display answer / ticket status
+
+    %% ===== OBSERVABILITY (async) =====
+    par Telemetry
+        Sup->>CW: Send logs, metrics, traces
+        ITAg->>CW: Send logs, metrics, traces
+        HRAg->>CW: Send logs, metrics, traces
+    end

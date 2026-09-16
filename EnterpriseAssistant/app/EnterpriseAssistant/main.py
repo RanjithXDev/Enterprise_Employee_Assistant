@@ -1,3 +1,8 @@
+import os
+import stat
+import sys
+import time
+from pathlib import Path
 from typing import Any
 import uuid
 
@@ -13,10 +18,49 @@ from services.conversation_service import (
     get_conversation,
     touch_conversation,
 )
+from services.metrics_service import emit_request_metrics
 
 
 app = BedrockAgentCoreApp()
 log = app.logger
+
+
+def _ensure_playwright_driver_executable() -> None:
+    """
+    Restore the executable bit on Playwright's bundled Node.js driver.
+
+    The AgentCore Runtime deployment zip does not always preserve the
+    executable permission bit on binary files. When that happens, the
+    IT Agent's AgentCore Browser tool fails on its very first use with
+    "PermissionError: [Errno 13] Permission denied:
+    '.../playwright/driver/node'" — the browser session can never
+    start. This restores the bit at process startup (once per cold
+    start); it is a safe no-op if the bit is already set, e.g. local
+    development.
+    """
+
+    try:
+        import playwright
+
+        driver_dir = Path(playwright.__file__).parent / "driver"
+        driver_name = "node.exe" if sys.platform == "win32" else "node"
+        driver_path = driver_dir / driver_name
+
+        if driver_path.exists():
+            current_mode = os.stat(driver_path).st_mode
+            os.chmod(
+                driver_path,
+                current_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH,
+            )
+    except Exception:
+        log.warning(
+            "Could not ensure the Playwright driver is executable; "
+            "the AgentCore Browser tool may fail to start a session.",
+            exc_info=True,
+        )
+
+
+_ensure_playwright_driver_executable()
 
 
 def _get_usage_value(usage: Any, key: str) -> int:
@@ -138,6 +182,44 @@ def _is_inline_function_call(event: dict) -> bool:
 
 @app.entrypoint
 async def invoke(payload, context):
+    """
+    Thin wrapper around _invoke_impl that always emits request-level
+    CloudWatch metrics (latency, success/failure, tokens, per-tool
+    stats) via emit_request_metrics — including on the early-exit
+    validation failures inside _invoke_impl that happen before
+    user_role/observability are known.
+    """
+
+    start_time = time.perf_counter()
+    context_out: dict[str, Any] = {}
+    success = True
+
+    try:
+        async for event in _invoke_impl(payload, context, context_out):
+            yield event
+    except Exception:
+        success = False
+        raise
+    finally:
+        latency_ms = (time.perf_counter() - start_time) * 1000
+
+        emit_request_metrics(
+            user_role=context_out.get("user_role", "Unknown"),
+            success=success,
+            latency_ms=latency_ms,
+            observability=context_out.get(
+                "observability",
+                {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "total_tokens": 0,
+                    "tools": [],
+                },
+            ),
+        )
+
+
+async def _invoke_impl(payload, context, context_out: dict[str, Any]):
     log.info("Invoking Enterprise Employee Assistant")
 
     # ---------------------------------------------------------
@@ -210,6 +292,8 @@ async def invoke(payload, context):
         else "Employee"
     )
 
+    context_out["user_role"] = user_role
+
     # ---------------------------------------------------------
     # 4. Extract the user request
     # ---------------------------------------------------------
@@ -262,6 +346,8 @@ async def invoke(payload, context):
         "total_tokens": 0,
         "tools": [],
     }
+
+    context_out["observability"] = observability
 
     # ---------------------------------------------------------
     # 7. Create the Orchestration Agent

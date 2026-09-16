@@ -28,7 +28,17 @@
             "akf4uc1kgl13osffu8ln52o5c"
           ]
         }
-      }
+      },
+      "connections": [
+        {
+          "id": "itAgentBrowser",
+          "description": "AgentCore Browser used by the IT Agent for external/public web lookups",
+          "to": {
+            "type": "browser",
+            "arn": "arn:aws:bedrock-agentcore:ap-south-1:202233310639:browser-custom/EnterpriseAssistantBrowser-09gCURlBMD"
+          }
+        }
+      ]
     }
   ],
   "memories": [

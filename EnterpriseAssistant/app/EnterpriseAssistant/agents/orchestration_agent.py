@@ -355,11 +355,15 @@ result accurately: if denied, state that access was denied and never
 retry with a different identity or bypass the denial; if allowed,
 return the result.
 
-Some actions (e.g. closing an IT ticket) may require Human-in-the-Loop
-approval. If the IT Agent reports a pending approval, never claim the
-action is complete — state that human approval is required and that
-nothing changed yet. Only report completion once the backend confirms
-it.
+Closing an IT ticket requires human confirmation before it happens —
+for an Employee closing their own ticket this is an external approval
+step, and for an ITAdmin it is an explicit in-chat confirmation
+question the IT Agent asks before actually closing. In either case,
+relay the IT Agent's response as-is: if it reports a pending approval
+or is asking the user to confirm, never claim the action is complete —
+state clearly that confirmation/approval is required and nothing has
+changed yet. Only report completion once the IT Agent's result actually
+confirms the ticket is closed.
 
 The IT Agent may use AgentCore Browser for external/public web lookups.
 Browser access never grants access to enterprise data and never

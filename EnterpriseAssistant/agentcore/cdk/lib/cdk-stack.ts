@@ -8,7 +8,8 @@ import {
   type CustomJWTAuthorizerConfig,
   type HarnessDeploymentConfig,
 } from '@aws/agentcore-cdk';
-import { CfnOutput, Stack, type StackProps } from 'aws-cdk-lib';
+import { CfnOutput, Duration, Stack, type StackProps } from 'aws-cdk-lib';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
 
@@ -144,6 +145,7 @@ export class AgentCoreStack extends Stack {
             'arn:aws:dynamodb:ap-south-1:202233310639:table/EnterpriseDevices',
             'arn:aws:dynamodb:ap-south-1:202233310639:table/EnterpriseITTickets',
             'arn:aws:dynamodb:ap-south-1:202233310639:table/EnterpriseHRLeave',
+            'arn:aws:dynamodb:ap-south-1:202233310639:table/EnterpriseAssistantApprovals',
             'arn:aws:dynamodb:ap-south-1:202233310639:table/EnterpriseAssistantConversations',
           ],
         }),
@@ -160,6 +162,25 @@ export class AgentCoreStack extends Stack {
           resources: [
             'arn:aws:bedrock:ap-south-1:202233310639:knowledge-base/7UDOWAFZE3',
             'arn:aws:bedrock:ap-south-1:202233310639:guardrail/9dn7o0sr1d13',
+          ],
+        }),
+      );
+
+      // Allow the runtime to use the AgentCore Browser.
+      env.runtime.role.addToPrincipalPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: [
+            'bedrock-agentcore:StartBrowserSession',
+            'bedrock-agentcore:ListBrowserSessions',
+            'bedrock-agentcore:GetBrowserSession',
+            'bedrock-agentcore:StopBrowserSession',
+            'bedrock-agentcore:UpdateBrowserStream',
+            'bedrock-agentcore:ConnectBrowserAutomationStream',
+            'bedrock-agentcore:ConnectBrowserLiveViewStream',
+          ],
+          resources: [
+            'arn:aws:bedrock-agentcore:ap-south-1:202233310639:browser-custom/EnterpriseAssistantBrowser-09gCURlBMD',
           ],
         }),
       );
@@ -320,6 +341,128 @@ export class AgentCoreStack extends Stack {
         });
       }
     }
+
+    // ---------------------------------------------------------------
+    // Observability dashboard
+    //
+    // Sourced from CloudWatch Embedded Metric Format (EMF) lines the
+    // runtime emits per request (see services/metrics_service.py)
+    // under the "EnterpriseAssistant/Agents" namespace — no extra IAM
+    // permissions needed, since EMF is just structured log output.
+    //
+    // Tool-level widgets use SEARCH() expressions keyed on the
+    // ToolName dimension instead of listing tool names explicitly, so
+    // newly added tools show up automatically without touching this
+    // stack.
+    //
+    // This adopts the "EnterpriseAssistant-Observability" dashboard
+    // that already exists in the account (previously empty, created
+    // outside CDK) — deploying this stack brings it under CDK
+    // management under the same name.
+    // ---------------------------------------------------------------
+
+    const metricsNamespace = 'EnterpriseAssistant/Agents';
+    const period = Duration.minutes(5);
+
+    const search = (metricName: string, stat: string, label: string) =>
+      new cloudwatch.MathExpression({
+        expression: `SEARCH('{${metricsNamespace},UserRole} MetricName="${metricName}"', '${stat}', ${period.toSeconds()})`,
+        label,
+        period,
+      });
+
+    const searchByTool = (metricName: string, stat: string, label: string) =>
+      new cloudwatch.MathExpression({
+        expression: `SEARCH('{${metricsNamespace},UserRole,ToolName} MetricName="${metricName}"', '${stat}', ${period.toSeconds()})`,
+        label,
+        period,
+      });
+
+    const dashboard = new cloudwatch.Dashboard(this, 'ObservabilityDashboard', {
+      dashboardName: 'EnterpriseAssistant-Observability',
+    });
+
+    dashboard.addWidgets(
+      new cloudwatch.SingleValueWidget({
+        title: 'Requests (24h)',
+        metrics: [search('RequestCount', 'Sum', 'Requests')],
+        width: 6,
+        height: 6,
+      }),
+      new cloudwatch.SingleValueWidget({
+        title: 'Errors (24h)',
+        metrics: [search('RequestErrors', 'Sum', 'Errors')],
+        width: 6,
+        height: 6,
+      }),
+      new cloudwatch.SingleValueWidget({
+        title: 'Avg Latency (ms)',
+        metrics: [search('RequestLatencyMs', 'Average', 'Avg Latency (ms)')],
+        width: 6,
+        height: 6,
+      }),
+      new cloudwatch.SingleValueWidget({
+        title: 'Total Tokens (24h)',
+        metrics: [search('TotalTokens', 'Sum', 'Total Tokens')],
+        width: 6,
+        height: 6,
+      }),
+    );
+
+    dashboard.addWidgets(
+      new cloudwatch.GraphWidget({
+        title: 'Requests & Errors by Role',
+        left: [
+          search('RequestCount', 'Sum', 'Requests'),
+          search('RequestErrors', 'Sum', 'Errors'),
+        ],
+        width: 12,
+        height: 6,
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Request Latency (ms)',
+        left: [
+          search('RequestLatencyMs', 'Average', 'Avg Latency'),
+          search('RequestLatencyMs', 'p99', 'p99 Latency'),
+        ],
+        width: 12,
+        height: 6,
+      }),
+    );
+
+    dashboard.addWidgets(
+      new cloudwatch.GraphWidget({
+        title: 'Token Usage',
+        left: [
+          search('InputTokens', 'Sum', 'Input Tokens'),
+          search('OutputTokens', 'Sum', 'Output Tokens'),
+          search('TotalTokens', 'Sum', 'Total Tokens'),
+        ],
+        width: 24,
+        height: 6,
+      }),
+    );
+
+    dashboard.addWidgets(
+      new cloudwatch.GraphWidget({
+        title: 'Tool Calls by Tool',
+        left: [searchByTool('ToolCalls', 'Sum', 'Tool Calls')],
+        width: 8,
+        height: 6,
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Tool Errors by Tool',
+        left: [searchByTool('ToolErrors', 'Sum', 'Tool Errors')],
+        width: 8,
+        height: 6,
+      }),
+      new cloudwatch.GraphWidget({
+        title: 'Avg Tool Duration (ms) by Tool',
+        left: [searchByTool('ToolDurationMs', 'Average', 'Avg Duration (ms)')],
+        width: 8,
+        height: 6,
+      }),
+    );
 
     // Stack-level output
     new CfnOutput(this, 'StackNameOutput', {

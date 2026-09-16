@@ -7,6 +7,7 @@ from services.ticket_service import (
     update_ticket,
     close_ticket,
     list_all_tickets as _list_all_tickets,
+    get_tickets_by_employee,
 )
 
 from services.approval_service import create_approval
@@ -103,37 +104,46 @@ def build_it_tools(requester_id: str, user_role: str) -> list:
         )
 
     @tool
-    def create_it_ticket(employee_id: str, title: str, description: str) -> str:
+    def create_it_ticket(
+        title: str,
+        description: str,
+        employee_id: str = "",
+    ) -> str:
         """
         Create an IT support ticket.
 
-        Employees can create tickets for themselves.
-        ITAdmins can create tickets for employees.
+        employee_id is OPTIONAL. When omitted (or blank), the ticket is
+        created for the authenticated caller automatically — Employees
+        never need to supply their own employee ID to open a ticket for
+        themselves. ITAdmins may pass an explicit employee_id to open a
+        ticket on behalf of another employee.
         """
 
-        if not _is_authorized(requester_id, employee_id, user_role):
+        target_employee_id = employee_id or requester_id
+
+        if not _is_authorized(requester_id, target_employee_id, user_role):
             return (
                 f"Access denied. Employee {requester_id} "
-                f"cannot create a ticket for employee {employee_id}."
+                f"cannot create a ticket for employee {target_employee_id}."
             )
 
-        employee = get_employee(employee_id)
+        employee = get_employee(target_employee_id)
 
         if not employee:
-            return f"No employee found for employee {employee_id}."
+            return f"No employee found for employee {target_employee_id}."
 
         ticket_id = f"INC-{uuid.uuid4().hex[:8].upper()}"
 
         ticket = create_ticket(
             ticket_id=ticket_id,
-            employee_id=employee_id,
+            employee_id=target_employee_id,
             title=title,
             description=description,
             priority="Medium",
         )
 
         if not ticket:
-            return f"Unable to create ticket for employee {employee_id}."
+            return f"Unable to create ticket for employee {target_employee_id}."
 
         return (
             "IT ticket details:\n"
@@ -178,17 +188,88 @@ def build_it_tools(requester_id: str, user_role: str) -> list:
         )
 
     @tool
+    def list_my_tickets(
+        employee_id: str = "",
+        latest_only: bool = False,
+    ) -> str:
+        """
+        List IT tickets belonging to an employee (not restricted to
+        ITAdmin — this is the everyday "list my tickets" tool).
+
+        employee_id is OPTIONAL. When omitted (or blank), lists the
+        authenticated caller's own tickets. Employees may only list
+        their own tickets; ITAdmins may pass a different employee_id to
+        list another employee's tickets.
+
+        Set latest_only=True when the user asks for only their latest/
+        most recent ticket (e.g. "show my latest ticket") instead of
+        the full list — this returns just the single most recently
+        created ticket.
+        """
+
+        target_employee_id = employee_id or requester_id
+
+        if not _is_authorized(requester_id, target_employee_id, user_role):
+            return (
+                f"Access denied. Employee {requester_id} "
+                f"is not authorized to list tickets for "
+                f"{target_employee_id}."
+            )
+
+        tickets = get_tickets_by_employee(target_employee_id)
+
+        if not tickets:
+            return f"No tickets found for employee {target_employee_id}."
+
+        tickets = sorted(
+            tickets,
+            key=lambda t: t.get("created_at", ""),
+            reverse=True,
+        )
+
+        if latest_only:
+            tickets = tickets[:1]
+            header = f"Latest IT ticket for employee {target_employee_id}:"
+        else:
+            header = (
+                f"IT tickets for employee {target_employee_id} "
+                f"({len(tickets)} total):"
+            )
+
+        lines = [header]
+
+        for ticket in tickets:
+            lines.append(
+                f"- Ticket ID: {ticket.get('ticket_id', 'N/A')}, "
+                f"Title: {ticket.get('title', 'N/A')}, "
+                f"Status: {ticket.get('status', 'N/A')}, "
+                f"Priority: {ticket.get('priority', 'N/A')}, "
+                f"Created At: {ticket.get('created_at', 'N/A')}"
+            )
+
+        return "\n".join(lines)
+
+    @tool
     def update_it_ticket(
         ticket_id: str,
         status: str = "",
         priority: str = "",
     ) -> str:
         """
-        Update an existing IT ticket.
+        Update an existing IT ticket's status or priority.
 
-        Employees can update their own tickets.
-        ITAdmins can update tickets across employees.
+        Restricted to ITAdmin users only. Employees cannot update ticket
+        status or priority via chat, even for their own tickets — only
+        ITAdmins may perform this operation.
         """
+
+        if not _is_admin(user_role):
+            return (
+                f"Access denied. Employee {requester_id} is not "
+                f"authorized to update ticket {ticket_id}. Updating "
+                f"ticket status or priority is restricted to ITAdmin "
+                f"users."
+            )
 
         valid_statuses = {
             "Open",
@@ -221,12 +302,6 @@ def build_it_tools(requester_id: str, user_role: str) -> list:
         if not ticket:
             return f"No ticket found for ticket ID {ticket_id}."
 
-        if not _is_authorized(requester_id, ticket["employee_id"], user_role):
-            return (
-                f"Access denied. Employee {requester_id} "
-                f"is not authorized to update ticket {ticket_id}."
-            )
-
         if not status and not priority:
             return "No ticket changes were provided."
 
@@ -249,30 +324,32 @@ def build_it_tools(requester_id: str, user_role: str) -> list:
     @tool
     def close_it_ticket(ticket_id: str) -> str:
         """
-        Request approval before closing an IT ticket.
+        Request approval before closing an IT ticket (Employee
+        self-service path).
 
-        Employees and ITAdmins must receive approval before
-        the ticket is actually closed.
+        Employees can request closure of their own tickets this way;
+        it routes through the external Human-in-the-Loop approval
+        workflow and does NOT close the ticket immediately.
+
+        This is NOT for ITAdmin ticket closures. ITAdmins must use
+        admin_close_it_ticket instead, which closes the ticket
+        immediately after an explicit in-chat confirmation rather than
+        the external approval workflow.
         """
 
-        print(
-            f"[HITL DEBUG] "
-            f"requester_id={requester_id}, "
-            f"user_role={user_role}, "
-            f"ticket_id={ticket_id}"
-        )
+        if _is_admin(user_role):
+            return (
+                "This tool is for Employee self-service ticket closure "
+                "requests only, which route through external approval. "
+                "Use admin_close_it_ticket instead — it closes the "
+                "ticket immediately after an explicit in-chat "
+                "confirmation from the admin."
+            )
 
         ticket = get_ticket(ticket_id)
 
         if not ticket:
             return f"No ticket found for ticket ID {ticket_id}."
-        
-        print(
-            f"[HITL DEBUG] "
-            f"ticket_employee_id={ticket['employee_id']}, "
-            f"requester_id={requester_id}, "
-            f"user_role={user_role}"
-        )
 
         if not _is_authorized(requester_id, ticket["employee_id"], user_role):
             return (
@@ -306,6 +383,73 @@ def build_it_tools(requester_id: str, user_role: str) -> list:
             f"User Role: {user_role}\n"
             "The ticket has NOT been closed. "
             "Human approval is required before this action can be executed."
+        )
+
+    @tool
+    def admin_close_it_ticket(
+        ticket_id: str,
+        confirmed: bool = False,
+    ) -> str:
+        """
+        Close an IT ticket via an in-chat confirmation, restricted to
+        ITAdmin users.
+
+        This is a two-step tool:
+
+        Step 1 — call with confirmed=False (the default) or simply omit
+        it. This does NOT close the ticket. It returns the ticket's
+        current details so you can show them to the admin and ask an
+        explicit yes/no confirmation question in the chat (e.g. "Are
+        you sure you want to close ticket INC-1001? This cannot be
+        undone.").
+
+        Step 2 — only after the admin's OWN reply in this conversation
+        explicitly confirms (e.g. "yes", "confirm", "close it"), call
+        this tool again with confirmed=True. This actually closes the
+        ticket immediately — there is no further external approval
+        step for ITAdmin closures.
+
+        Never pass confirmed=True unless the admin explicitly confirmed
+        in their own message. Never infer or assume confirmation.
+        """
+
+        if not _is_admin(user_role):
+            return (
+                f"Access denied. Employee {requester_id} is not "
+                f"authorized to use admin_close_it_ticket. Only "
+                f"ITAdmin users can close tickets this way; Employees "
+                f"should use close_it_ticket instead."
+            )
+
+        ticket = get_ticket(ticket_id)
+
+        if not ticket:
+            return f"No ticket found for ticket ID {ticket_id}."
+
+        if ticket["status"] == "Closed":
+            return f"Ticket {ticket_id} is already closed."
+
+        if not confirmed:
+            return (
+                "CONFIRMATION_REQUIRED\n"
+                f"Ticket ID: {ticket['ticket_id']}\n"
+                f"Employee ID: {ticket['employee_id']}\n"
+                f"Title: {ticket.get('title', '')}\n"
+                f"Current Status: {ticket['status']}\n"
+                "The ticket has NOT been closed. Ask the admin to "
+                "explicitly confirm in the chat before calling this "
+                "tool again with confirmed=True."
+            )
+
+        updated_ticket = close_ticket(ticket_id)
+
+        if not updated_ticket:
+            return f"Unable to close ticket {ticket_id}."
+
+        return (
+            f"Ticket {ticket_id} has been closed successfully.\n"
+            f"Employee ID: {ticket['employee_id']}\n"
+            f"Status: {updated_ticket.get('status', 'Unknown')}"
         )
 
     @tool
@@ -370,8 +514,10 @@ def build_it_tools(requester_id: str, user_role: str) -> list:
         get_employee_information,
         create_it_ticket,
         get_ticket_details,
+        list_my_tickets,
         update_it_ticket,
         close_it_ticket,
+        admin_close_it_ticket,
         list_all_devices,
         list_all_tickets,
     ]
